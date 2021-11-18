@@ -6,52 +6,73 @@
  * 4) Сократить время исполнения скрипта
  * 5) Посчитать комиссию, которую получит каждый бейкер с блока 832543 по 832546
  */
-
-const axios = require('axios');
-const BPromise = require('bluebird');
-const range = require('lodash.range');
+import  axios from 'axios';
+import  BPromise from 'bluebird';
+import  range from 'lodash.range';
 
 const start = new Date().getTime();
 const time = () => (new Date().getTime() - start)/1000;
 const address = 'tz1TaLYBeGZD3yKVHQGBM857CcNnFFNceLYh';
 
+type Content = {
+  fee: string
+}
+
+type Transaction = {
+  contents: Array<Content>
+}
+
+type Block ={
+  operations: Array<Array<Transaction>>
+}
+
 class TezosBlock {
-  constructor(number){
+
+  private data: Block | null;
+
+  constructor(private readonly number: number){
     this.number = number;
     this.data = null;
   }
-  async loadData(){ // Выгружаем данные из публичной ноды
-    this.data = (await axios.get('https://teznode.letzbake.com/chains/main/blocks/'+this.number)).data;
+  async loadData(): Promise<void>{ // Выгружаем данные из публичной ноды
+    this.data = (await axios.get<Block>('https://teznode.letzbake.com/chains/main/blocks/'+this.number)).data;
+  }
+
+  public getData(): Block {
+    if(!this.data){
+      throw new Error('Block is not loaded');
+    }
+    return this.data;
   }
 }
 
-async function loadBlocks(){
+async function loadBlocks(): Promise<Array<Block>>{
   return BPromise
-      .map(range(832543, 832546), async (block)=>{
-        let Block = new TezosBlock(block);
-        await Block.loadData();
-        return Block.data
+      .map(range(832543, 832546), async (number)=>{
+        const block = new TezosBlock(number);
+        await block.loadData();
+        return block.getData()
       })
-      .reduce((list, data)=>{
+      .reduce((list: Array<Block>, data)=>{
         list.push(data);
         return list;
       }, [])
 }
 
-async function getTransactions(list){
+async function getTransactions(list: Array<Block>){
   return BPromise.map(list, async (listItem)=>{
     const operations = listItem.operations;
-    return BPromise.reduce(operations, (operationTransactions, operation)=>{
+    return BPromise.reduce(operations, (operationTransactions: Array<Transaction>, operation)=>{
       operationTransactions.push(...operation)
       return operationTransactions;
     }, [])
-  }).reduce((transactions, operationTransactions)=>{
+  }).reduce((transactions: Array<Transaction>, operationTransactions)=>{
     return [...transactions, ...operationTransactions];
   }, [])
 }
 
-async function considerCommission(transactions){
-  return BPromise.reduce(transactions, async (bakers_fees, tx)=>{
+async function considerCommission(transactions: Array<Transaction>){
+  return BPromise.reduce(transactions, async (bakers_fees: Record<string, number>, tx)=>{
     if(!tx.contents) {
       return bakers_fees;
     }
